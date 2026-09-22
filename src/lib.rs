@@ -30,7 +30,7 @@
 //! # Ok::<(), anagram::error::Error>(())
 //! ```
 
-pub mod commands;
+pub mod cli;
 pub mod error;
 pub mod format;
 pub mod ingest;

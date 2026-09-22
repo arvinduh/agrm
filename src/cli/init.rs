@@ -6,7 +6,7 @@ use owo_colors::OwoColorize;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::commands::resolve_db_path;
+use crate::cli::resolve_db_path;
 use crate::format::writer::Writer;
 use crate::ingest::{DEFAULT_DICTIONARY_URL, Source, ingest};
 use crate::ui::format_count;

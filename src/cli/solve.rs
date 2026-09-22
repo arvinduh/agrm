@@ -5,8 +5,8 @@ use owo_colors::OwoColorize;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::commands::init::{InitArgs, run as run_init};
-use crate::commands::resolve_db_path;
+use crate::cli::init::{InitArgs, run as run_init};
+use crate::cli::resolve_db_path;
 use crate::format::reader::Reader;
 use crate::ui::{
   COLUMN_SPACING, MAX_LAYOUT_WIDTH, detect_terminal_width,
