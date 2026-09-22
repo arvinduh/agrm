@@ -69,7 +69,6 @@ pub fn run(args: SolveArgs) -> crate::Result<()> {
       sources: Vec::new(),
       output: Some(db_path.clone()),
       force: false,
-      quiet: false,
     };
     run_init(init_args)?;
   }
