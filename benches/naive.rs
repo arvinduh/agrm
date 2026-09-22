@@ -1,8 +1,8 @@
 //! Naive sub-anagram baselines to compare against the trie in `benchmark.rs`.
 //!
-//! Uses the same dictionary, queries, round counts, and CSV schema as
-//! `benchmark.rs`, so `compare.py` can read both. Both baselines hold the
-//! word list in memory and scan all of it on every query:
+//! Uses the same dictionary, racks, workloads, and CSV schema as
+//! `benchmark.rs` (see `common`), so `compare.py` can read both. Both
+//! baselines hold the word list in memory and scan all of it on every query:
 //!
 //! - `scan`: counts each word's letters on the fly and checks them against the
 //!   rack, bailing out on the first letter the rack cannot supply.
@@ -14,31 +14,16 @@
 //! (roughly 50+ letters, where most of the dictionary matches) the trie visits
 //! nearly every node and the sequential `scan` becomes faster.
 
+mod common;
+
 use std::fs::{self, File};
-use std::hint::black_box;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
 use clap::Parser;
 
 use anagram::DEFAULT_DICTIONARY_URL;
-
-const MIN_LEN: usize = 3;
-const QUERIES: [&str; 10] = [
-  "cat",
-  "stop",
-  "apple",
-  "listen",
-  "roaster",
-  "creative",
-  "algorithms",
-  "relationship",
-  "conversational",
-  "characteristically",
-];
-const CSV_HEADER: &str =
-  "op,target,rounds,iterations,mean_s,min_s,max_s,median_s,stddev_s\n";
+use common::{CSV_HEADER, CacheEvictor, MIN_LEN, Row, time_rounds};
 
 #[derive(Parser, Debug)]
 #[command(about = "Benchmark naive sub-anagram baselines")]
@@ -59,14 +44,6 @@ struct Entry<'a> {
   len: usize,
   mask: u32,
   counts: [u8; 26],
-}
-
-struct Stats {
-  mean_s: f64,
-  min_s: f64,
-  max_s: f64,
-  median_s: f64,
-  stddev_s: f64,
 }
 
 fn letter_counts(s: &str) -> Option<[u8; 26]> {
@@ -150,49 +127,6 @@ fn sub_anagrams_hist<'a>(index: &[Entry<'a>], rack: &str) -> Vec<&'a str> {
     .collect()
 }
 
-fn compute_stats(mut times: Vec<f64>) -> Stats {
-  times.sort_by(|a, b| a.partial_cmp(b).unwrap());
-  let n = times.len() as f64;
-  let mean_s = times.iter().sum::<f64>() / n;
-  let variance = times.iter().map(|t| (t - mean_s).powi(2)).sum::<f64>() / n;
-  Stats {
-    mean_s,
-    min_s: times[0],
-    max_s: times[times.len() - 1],
-    median_s: times[times.len() / 2],
-    stddev_s: variance.sqrt(),
-  }
-}
-
-fn rounds_for(len: usize) -> u32 {
-  if len <= 7 {
-    50
-  } else if len <= 10 {
-    20
-  } else {
-    10
-  }
-}
-
-/// Runs `f` once to warm up, then `rounds` timed times.
-fn time_rounds<T>(rounds: u32, mut f: impl FnMut() -> T) -> (Stats, T) {
-  let mut last = f();
-  let mut times = Vec::with_capacity(rounds as usize);
-  for _ in 0..rounds {
-    let t0 = Instant::now();
-    last = black_box(f());
-    times.push(t0.elapsed().as_secs_f64());
-  }
-  (compute_stats(times), last)
-}
-
-fn csv_row(op: &str, target: &str, rounds: u32, s: &Stats) -> String {
-  format!(
-    "{op},{target},{rounds},1,{:.9},{:.9},{:.9},{:.9},{:.9}\n",
-    s.mean_s, s.min_s, s.max_s, s.median_s, s.stddev_s
-  )
-}
-
 fn ensure_raw_dictionary() -> PathBuf {
   let path = std::env::temp_dir().join("words_alpha.txt");
   if !path.exists() {
@@ -205,13 +139,41 @@ fn ensure_raw_dictionary() -> PathBuf {
   path
 }
 
-fn write_csv(dir: &Path, name: &str, body: &str) {
+fn read_dict(path: &Path) -> String {
+  fs::read_to_string(path).expect("failed to read dictionary")
+}
+
+fn write_csv(dir: &Path, name: &str, rows: &[Row]) {
   fs::create_dir_all(dir).expect("failed to create output directory");
   let path = dir.join(name);
+  let mut body = format!("{CSV_HEADER}\n");
+  for row in rows {
+    body += &row.to_csv();
+    body.push('\n');
+  }
   File::create(&path)
     .and_then(|mut f| f.write_all(body.as_bytes()))
     .expect("failed to write CSV");
   println!("Saved {}", path.display());
+}
+
+fn print_table(scan: &[Row], hist: &[Row]) {
+  println!(
+    "{:<8} {:>4}  {:<20} {:>8} {:>12} {:>12}",
+    "op", "len", "query", "matches", "scan", "hist"
+  );
+  for (s, h) in scan.iter().zip(hist) {
+    assert_eq!(s.items_count, h.items_count, "baselines disagree");
+    println!(
+      "{:<8} {:>4}  {:<20} {:>8} {:>9.1} µs {:>9.1} µs",
+      s.op,
+      s.target.len(),
+      s.target,
+      s.items_count,
+      s.stats.mean_s * 1e6,
+      h.stats.mean_s * 1e6,
+    );
+  }
 }
 
 fn main() {
@@ -219,51 +181,45 @@ fn main() {
   let raw_dict = ensure_raw_dictionary();
 
   // Parse: read and split for `scan`; also build histograms for `hist`.
-  let (parse_scan, _) = time_rounds(5, || {
-    let text = fs::read_to_string(&raw_dict).expect("failed to read dict");
-    load_words(&text).len()
-  });
-  let (parse_hist, _) = time_rounds(5, || {
-    let text = fs::read_to_string(&raw_dict).expect("failed to read dict");
-    build_index(&load_words(&text)).len()
-  });
+  let parse = |op_stats: common::Stats, items_count| Row {
+    op: "parse",
+    target: "dwyl_english",
+    rounds: 5,
+    items_count,
+    stats: op_stats,
+  };
+  let (stats, n) = time_rounds(5, || load_words(&read_dict(&raw_dict)).len());
+  let mut scan_rows = vec![parse(stats, n)];
+  let (stats, n) =
+    time_rounds(5, || build_index(&load_words(&read_dict(&raw_dict))).len());
+  let mut hist_rows = vec![parse(stats, n)];
 
-  let text = fs::read_to_string(&raw_dict).expect("failed to read dict");
+  // `query` and `mixed` against the loaded list.
+  let text = read_dict(&raw_dict);
   let words = load_words(&text);
   let index = build_index(&words);
+  scan_rows.extend(common::run_hot(|rack| {
+    sub_anagrams_scan(&words, rack).len()
+  }));
+  hist_rows.extend(common::run_hot(|rack| {
+    sub_anagrams_hist(&index, rack).len()
+  }));
 
-  let mut scan_csv = String::from(CSV_HEADER);
-  let mut hist_csv = String::from(CSV_HEADER);
-  scan_csv += &csv_row("parse", "dwyl_english", 5, &parse_scan);
-  hist_csv += &csv_row("parse", "dwyl_english", 5, &parse_hist);
+  // `startup`: reload the list from disk for every call.
+  let mut evictor = CacheEvictor::new();
+  scan_rows.extend(common::run_startup(&mut evictor, |rack| {
+    sub_anagrams_scan(&load_words(&read_dict(&raw_dict)), rack).len()
+  }));
+  hist_rows.extend(common::run_startup(&mut evictor, |rack| {
+    let text = read_dict(&raw_dict);
+    sub_anagrams_hist(&build_index(&load_words(&text)), rack).len()
+  }));
 
   println!("{} words loaded", words.len());
-  println!(
-    "{:>4}  {:<20} {:>8} {:>12} {:>12}",
-    "len", "query", "matches", "scan", "hist"
-  );
-  for query in QUERIES {
-    let rounds = rounds_for(query.len());
-    let (scan, scan_words) =
-      time_rounds(rounds, || sub_anagrams_scan(&words, query));
-    let (hist, hist_words) =
-      time_rounds(rounds, || sub_anagrams_hist(&index, query));
-    assert_eq!(scan_words, hist_words, "baselines disagree on {query}");
-
-    println!(
-      "{:>4}  {:<20} {:>8} {:>9.1} µs {:>9.1} µs",
-      query.len(),
-      query,
-      scan_words.len(),
-      scan.mean_s * 1e6,
-      hist.mean_s * 1e6,
-    );
-    scan_csv += &csv_row("query", query, rounds, &scan);
-    hist_csv += &csv_row("query", query, rounds, &hist);
-  }
+  print_table(&scan_rows, &hist_rows);
 
   if let Some(dir) = args.save {
-    write_csv(&dir, "rust_naive_scan.csv", &scan_csv);
-    write_csv(&dir, "rust_naive_hist.csv", &hist_csv);
+    write_csv(&dir, "rust_naive_scan.csv", &scan_rows);
+    write_csv(&dir, "rust_naive_hist.csv", &hist_rows);
   }
 }

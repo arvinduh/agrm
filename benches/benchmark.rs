@@ -1,11 +1,14 @@
 //! Benchmark harness for `anagram`.
 //!
-//! Measures dictionary ingestion (`parse`) and sub-anagram lookup (`query`)
-//! latency, rendering clean terminal tables with optional CSV export for comparisons.
+//! Measures dictionary ingestion (`parse`) and sub-anagram lookup latency under
+//! the `query`, `mixed`, and `startup` workloads defined in `common`, rendering
+//! clean terminal tables with optional CSV export for comparisons.
+
+mod common;
 
 use std::fs::File;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use clap::Parser;
@@ -16,6 +19,7 @@ use anagram::ui::{format_count, render_bar};
 use anagram::{
   DEFAULT_DICTIONARY_URL, Reader, Source, Writer, default_cache_path, ingest,
 };
+use common::{CSV_HEADER, CacheEvictor, MIN_LEN, Row, compute_stats};
 
 #[derive(Parser, Debug)]
 #[command(about = "Benchmark anagram solver ingestion and queries")]
@@ -24,42 +28,16 @@ struct Args {
   #[arg(long, hide = true)]
   bench: bool,
 
-  /// Path to save CSV benchmark results (defaults to benches/data/rust.csv if flag is passed without path)
+  /// Path to save CSV benchmark results (defaults to benches/data/rust_trie.csv if flag is passed without path)
   #[arg(
     long,
     short,
     alias = "csv",
     alias = "benchmark-csv",
     num_args = 0..=1,
-    default_missing_value = "benches/data/rust.csv"
+    default_missing_value = "benches/data/rust_trie.csv"
   )]
   save: Option<PathBuf>,
-}
-
-struct BenchmarkResult {
-  op: &'static str,
-  target: &'static str,
-  length: usize,
-  items_count: usize,
-  rounds: u32,
-  mean_s: f64,
-  min_s: f64,
-  max_s: f64,
-  median_s: f64,
-  stddev_s: f64,
-  throughput_wps: f64,
-}
-
-fn compute_stats(mut times: Vec<f64>) -> (f64, f64, f64, f64, f64) {
-  times.sort_by(|a, b| a.partial_cmp(b).unwrap());
-  let n = times.len() as f64;
-  let min_s = times[0];
-  let max_s = times[times.len() - 1];
-  let median_s = times[times.len() / 2];
-  let mean_s = times.iter().sum::<f64>() / n;
-  let variance = times.iter().map(|t| (t - mean_s).powi(2)).sum::<f64>() / n;
-  let stddev_s = variance.sqrt();
-  (mean_s, min_s, max_s, median_s, stddev_s)
 }
 
 fn ensure_raw_dictionary() -> PathBuf {
@@ -74,10 +52,10 @@ fn ensure_raw_dictionary() -> PathBuf {
   path
 }
 
-fn ensure_benchmark_database(raw_dict: &PathBuf) -> PathBuf {
+fn ensure_benchmark_database(raw_dict: &Path) -> PathBuf {
   let path = default_cache_path();
   if !path.exists() {
-    let sources = vec![Source::Local(raw_dict.clone())];
+    let sources = vec![Source::Local(raw_dict.to_path_buf())];
     let trie = ingest(&sources, |&b| b == b'\n' || b == b'\r');
     Writer::build_from_trie(&path, &trie)
       .expect("failed to build benchmark database");
@@ -85,33 +63,26 @@ fn ensure_benchmark_database(raw_dict: &PathBuf) -> PathBuf {
   path
 }
 
-fn write_csv(
-  path: &PathBuf,
-  results: &[BenchmarkResult],
-) -> std::io::Result<()> {
+fn write_csv(path: &Path, rows: &[Row]) -> std::io::Result<()> {
   if let Some(parent) = path.parent() {
     std::fs::create_dir_all(parent)?;
   }
   let mut file = File::create(path)?;
-  writeln!(
-    file,
-    "op,target,rounds,iterations,mean_s,min_s,max_s,median_s,stddev_s"
-  )?;
-  for r in results {
-    writeln!(
-      file,
-      "{},{},{},1,{:.9},{:.9},{:.9},{:.9},{:.9}",
-      r.op,
-      r.target,
-      r.rounds,
-      r.mean_s,
-      r.min_s,
-      r.max_s,
-      r.median_s,
-      r.stddev_s
-    )?;
+  writeln!(file, "{CSV_HEADER}")?;
+  for row in rows {
+    writeln!(file, "{}", row.to_csv())?;
   }
   Ok(())
+}
+
+fn words_per_sec(items: usize, secs: f64) -> String {
+  let wps = if secs > 0.0 { items as f64 / secs } else { 0.0 };
+  format!("{wps:.0} w/s")
+}
+
+fn duration_cell(secs: f64) -> Cell {
+  Cell::new(format!("{:?}", Duration::from_secs_f64(secs)))
+    .set_alignment(CellAlignment::Right)
 }
 
 fn main() {
@@ -119,9 +90,7 @@ fn main() {
   let raw_dict = ensure_raw_dictionary();
   let db_path = ensure_benchmark_database(&raw_dict);
 
-  let mut all_results = Vec::new();
-
-  // 1. Ingestion / Parse Benchmark (matching Python dwyl_english 5 rounds)
+  // 1. Ingestion / Parse Benchmark
   let parse_rounds = 5;
   let mut parse_times = Vec::with_capacity(parse_rounds as usize);
   let mut total_words = 0;
@@ -140,92 +109,24 @@ fn main() {
     let _ = std::fs::remove_file(&tmp_db);
   }
 
-  let (mean_s, min_s, max_s, median_s, stddev_s) = compute_stats(parse_times);
-  let parse_wps = if mean_s > 0.0 {
-    total_words as f64 / mean_s
-  } else {
-    0.0
-  };
-
-  let parse_result = BenchmarkResult {
+  let parse = Row {
     op: "parse",
     target: "dwyl_english",
-    length: 12,
-    items_count: total_words,
     rounds: parse_rounds,
-    mean_s,
-    min_s,
-    max_s,
-    median_s,
-    stddev_s,
-    throughput_wps: parse_wps,
+    items_count: total_words,
+    stats: compute_stats(parse_times),
   };
 
-  // 2. Query Lookups Benchmark
+  // 2. Query Benchmarks: `query` and `mixed` against one open reader, then
+  // `startup`, which reopens the database for every call.
   let reader = Reader::open_fast(&db_path).expect("failed to open database");
-  let queries = [
-    (3, "cat"),
-    (4, "stop"),
-    (5, "apple"),
-    (6, "listen"),
-    (7, "roaster"),
-    (8, "creative"),
-    (10, "algorithms"),
-    (12, "relationship"),
-    (15, "conversational"),
-    (18, "characteristically"),
-  ];
-
-  let mut query_results = Vec::new();
-  let mut max_query_micros = 0.0f64;
-
-  for (len, query) in queries {
-    // Warmup
-    let _ = reader.sub_anagrams(query, 3);
-
-    let rounds = if len <= 7 {
-      50
-    } else if len <= 10 {
-      20
-    } else {
-      10
-    };
-
-    let mut times = Vec::with_capacity(rounds as usize);
-    let mut words_count = 0;
-    for _ in 0..rounds {
-      let t0 = Instant::now();
-      let words = reader.sub_anagrams(query, 3);
-      times.push(t0.elapsed().as_secs_f64());
-      words_count = words.len();
-    }
-
-    let (mean_s, min_s, max_s, median_s, stddev_s) = compute_stats(times);
-    let micros = mean_s * 1_000_000.0;
-    if micros > max_query_micros {
-      max_query_micros = micros;
-    }
-
-    let throughput_wps = if mean_s > 0.0 {
-      words_count as f64 / mean_s
-    } else {
-      0.0
-    };
-
-    query_results.push(BenchmarkResult {
-      op: "query",
-      target: query,
-      length: len,
-      items_count: words_count,
-      rounds,
-      mean_s,
-      min_s,
-      max_s,
-      median_s,
-      stddev_s,
-      throughput_wps,
-    });
-  }
+  let hot = common::run_hot(|rack| reader.sub_anagrams(rack, MIN_LEN).len());
+  let startup = common::run_startup(&mut CacheEvictor::new(), |rack| {
+    Reader::open_fast(&db_path)
+      .expect("failed to open database")
+      .sub_anagrams(rack, MIN_LEN)
+      .len()
+  });
 
   // Render Parse Table
   let mut parse_table = Table::new();
@@ -240,23 +141,28 @@ fn main() {
     ]);
 
   parse_table.add_row(vec![
-    Cell::new(parse_result.op),
-    Cell::new(parse_result.target),
-    Cell::new(format_count(parse_result.items_count))
+    Cell::new(parse.op),
+    Cell::new(parse.target),
+    Cell::new(format_count(parse.items_count))
       .set_alignment(CellAlignment::Right),
-    Cell::new(format!(
-      "{:?}",
-      Duration::from_secs_f64(parse_result.mean_s)
-    ))
-    .set_alignment(CellAlignment::Right),
-    Cell::new(format!("{:.0} w/s", parse_result.throughput_wps))
+    duration_cell(parse.stats.mean_s),
+    Cell::new(words_per_sec(parse.items_count, parse.stats.mean_s))
       .set_alignment(CellAlignment::Right),
   ]);
 
   println!("{parse_table}");
   println!();
 
-  // Render Query Table
+  // Render Query Table: one row per rack, one column per workload.
+  let by_op = |op: &str| -> Vec<&Row> {
+    hot.iter().chain(&startup).filter(|r| r.op == op).collect()
+  };
+  let (query, mixed, cold) = (by_op("query"), by_op("mixed"), by_op("startup"));
+  let max_query_micros = query
+    .iter()
+    .map(|r| r.stats.mean_s * 1_000_000.0)
+    .fold(0.0, f64::max);
+
   let mut query_table = Table::new();
   query_table
     .load_style(UTF8_FULL.with_rounded_corners())
@@ -264,34 +170,34 @@ fn main() {
       Cell::new("Length").set_alignment(CellAlignment::Center),
       Cell::new("Query Sample"),
       Cell::new("Words Found").set_alignment(CellAlignment::Right),
-      Cell::new("Solve Time").set_alignment(CellAlignment::Right),
+      Cell::new("Query").set_alignment(CellAlignment::Right),
+      Cell::new("Mixed").set_alignment(CellAlignment::Right),
+      Cell::new("Startup").set_alignment(CellAlignment::Right),
       Cell::new("Throughput").set_alignment(CellAlignment::Right),
       Cell::new("Latency Chart"),
     ]);
 
-  for r in &query_results {
-    let micros = r.mean_s * 1_000_000.0;
-    let bar = render_bar(micros, max_query_micros, 20);
-    let time_str = format!("{:?}", Duration::from_secs_f64(r.mean_s));
-    let wps_str = format!("{:.0} w/s", r.throughput_wps);
-
+  for ((q, m), c) in query.iter().zip(&mixed).zip(&cold) {
+    let micros = q.stats.mean_s * 1_000_000.0;
     query_table.add_row(vec![
-      Cell::new(r.length).set_alignment(CellAlignment::Center),
-      Cell::new(r.target),
-      Cell::new(r.items_count).set_alignment(CellAlignment::Right),
-      Cell::new(time_str).set_alignment(CellAlignment::Right),
-      Cell::new(wps_str).set_alignment(CellAlignment::Right),
-      Cell::new(bar),
+      Cell::new(q.target.len()).set_alignment(CellAlignment::Center),
+      Cell::new(q.target),
+      Cell::new(q.items_count).set_alignment(CellAlignment::Right),
+      duration_cell(q.stats.mean_s),
+      duration_cell(m.stats.mean_s),
+      duration_cell(c.stats.mean_s),
+      Cell::new(words_per_sec(q.items_count, q.stats.mean_s))
+        .set_alignment(CellAlignment::Right),
+      Cell::new(render_bar(micros, max_query_micros, 20)),
     ]);
   }
 
   println!("{query_table}");
 
-  all_results.push(parse_result);
-  all_results.extend(query_results);
-
   if let Some(csv_path) = args.save {
-    if let Err(e) = write_csv(&csv_path, &all_results) {
+    let rows: Vec<Row> =
+      std::iter::once(parse).chain(hot).chain(startup).collect();
+    if let Err(e) = write_csv(&csv_path, &rows) {
       eprintln!("Failed to write CSV: {e}");
     }
   }
