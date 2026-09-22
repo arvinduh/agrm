@@ -32,9 +32,7 @@ pub struct InitArgs {
 }
 
 /// Executes the `init` command.
-pub fn run(
-  args: InitArgs,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub fn run(args: InitArgs) -> crate::Result<()> {
   let total_start = Instant::now();
   let output_path = resolve_db_path(args.output);
 

@@ -46,7 +46,7 @@ pub fn resolve_db_path(explicit: Option<PathBuf>) -> PathBuf {
 }
 
 /// Dispatches the parsed command to its respective handler.
-pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub fn run(args: Args) -> crate::Result<()> {
   match args.command {
     Commands::Init(args) => init::run(args),
     Commands::Solve(args) => solve::run(args),

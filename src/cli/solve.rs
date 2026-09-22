@@ -58,9 +58,7 @@ pub struct SolveArgs {
 }
 
 /// Executes the `solve` command.
-pub fn run(
-  args: SolveArgs,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub fn run(args: SolveArgs) -> crate::Result<()> {
   let total_start = Instant::now();
   let db_path = resolve_db_path(args.db);
 
