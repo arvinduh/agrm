@@ -1,7 +1,7 @@
 [project]
 name = "anagram"
 version = "0.1.0"
-description = "Add your description here"
+description = "Benchmark comparison tooling for agrm (benches/compare.py)"
 readme = "README.md"
 authors = [
     { name = "arvinduh", email = "" }
@@ -14,9 +14,5 @@ dependencies = [
     "seaborn>=0.13.2",
 ]
 
-[project.scripts]
-anagram = "anagram:main"
-
-[build-system]
-requires = ["uv_build>=0.12.7,<0.13.0"]
-build-backend = "uv_build"
+[tool.uv]
+package = false

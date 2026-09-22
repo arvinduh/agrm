@@ -38,6 +38,8 @@ SAVE = flags.DEFINE_string(
 
 
 DATA_DIR = Path("./benches/data")
+OPS = ("parse", "query", "mixed", "startup")
+OP_TITLES = {"query": "Hot Query", "mixed": "Mixed Query", "startup": "Startup"}
 REQUIRED_COLUMNS = frozenset({"op", "target", "mean_s"})
 
 
@@ -114,6 +116,16 @@ def load_bench(path: Path) -> pd.DataFrame:
   return df[["op", "target", "length", "engine", "mean_ms"]]
 
 
+def format_ms(value: float) -> str:
+  """Formats a latency in milliseconds with a readable unit (ns, µs, ms, s)."""
+  if pd.isna(value):
+    return "-"
+  for scale, unit in ((1e3, "s"), (1.0, "ms"), (1e-3, "µs")):
+    if value >= scale:
+      return f"{value / scale:.2f} {unit}"
+  return f"{value * 1e6:.0f} ns"
+
+
 def sort_engines(df: pd.DataFrame) -> list[str]:
   """Sorts engines by their mean latency across all operations and targets.
 
@@ -141,20 +153,22 @@ def sort_engines(df: pd.DataFrame) -> list[str]:
 
 
 def generate_summary_table(
-  df: pd.DataFrame, fastest: str, slowest: str
+  df: pd.DataFrame, engines: list[str]
 ) -> pd.DataFrame:
   """Generates a summary table of mean latencies and speedups.
 
   The dataframe MUST contain the required columns: `op`, `target`, `length`,
   `engine`, and `mean_ms`. The summary table will include the mean latencies for
-  each engine and the speedup from the fastest to the slowest engine.
+  each engine and, per row, the speedup of the fastest engine over the slowest
+  engine that reported that row. Rows are grouped by operation in `OPS` order.
 
   Args:
     df (pd.DataFrame): A pandas DataFrame containing benchmark data.
+    engines (list[str]): Engine names, used as the latency columns.
 
   Returns:
     A pandas DataFrame with the summary table, including mean latencies for each
-    engine and the speedup from the fastest to the slowest engine.
+    engine and the per-row speedup.
   """
   pivot = df.pivot(
     index=["op", "length", "target"],
@@ -162,23 +176,26 @@ def generate_summary_table(
     values="mean_ms",
   ).reset_index()
 
+  pivot["op"] = pd.Categorical(pivot["op"], categories=OPS, ordered=True)
   pivot.sort_values(
     by=["op", "length", "target"],
     inplace=True,
   )
 
   pivot.drop(columns=["length"], inplace=True)
-  pivot["speedup"] = pivot[slowest] / pivot[fastest]
+  timings = pivot[engines]
+  pivot["speedup"] = timings.max(axis=1) / timings.min(axis=1)
 
-  return pivot
+  return pivot[["op", "target", *engines, "speedup"]]
 
 
 def generate_graph(df: pd.DataFrame, engines: list[str]) -> figure.Figure:
-  """Generates and returns comparative visualization for query and parse operations.
+  """Generates and returns comparative visualization for every operation.
 
-  Left subplot displays a line plot of query read latencies sorted by word length.
-  Right subplot displays a bar chart of catalog ingestion (parse) latencies from
-  slowest to fastest engine, with dynamically sized thin bars and consistent color coding.
+  One line plot per query workload (`query`, `mixed`, `startup`) shows latency
+  by query word, sorted by word length, on a log scale so engines that differ
+  by orders of magnitude stay readable. The last subplot is a bar chart of
+  catalog ingestion (parse) latencies. Colors are consistent across subplots.
 
   Args:
     df (pd.DataFrame): Benchmark data containing `op`, `target`, `length`,
@@ -190,27 +207,35 @@ def generate_graph(df: pd.DataFrame, engines: list[str]) -> figure.Figure:
   """
   # create figure
   sns.set_theme(style="whitegrid", font_scale=0.95)
-  fig, (ax_line, ax_bar) = plt.subplots(
-    1, 2, figsize=(12, 4.8), gridspec_kw={"width_ratios": [2, 1]}
+  query_ops = [op for op in OPS if op != "parse" and (df["op"] == op).any()]
+  fig, axes = plt.subplots(
+    1,
+    len(query_ops) + 1,
+    figsize=(6 * len(query_ops) + 4, 4.8),
+    gridspec_kw={"width_ratios": [2] * len(query_ops) + [1]},
   )
+  *line_axes, ax_bar = axes
 
-  # Query subplot
-  sns.lineplot(
-    data=df[df["op"] == "query"].sort_values("length"),
-    x="target",
-    y="mean_ms",
-    hue="engine",
-    hue_order=engines,
-    palette="tab10",
-    linewidth=2.2,
-    marker="o",
-    ax=ax_line,
-  )
-
-  ax_line.set_title("Query Latency by Word", fontweight="bold")
-  ax_line.set_xlabel("Query Word")
-  ax_line.set_ylabel("Avg Latency (ms)")
-  ax_line.tick_params(axis="x", rotation=25)
+  # Query subplots
+  for op, ax in zip(query_ops, line_axes):
+    sns.lineplot(
+      data=df[df["op"] == op].sort_values("length"),
+      x="target",
+      y="mean_ms",
+      hue="engine",
+      hue_order=engines,
+      palette="tab10",
+      linewidth=2.2,
+      marker="o",
+      ax=ax,
+    )
+    ax.set_yscale("log")
+    ax.set_title(f"{OP_TITLES[op]} Latency by Word", fontweight="bold")
+    ax.set_xlabel("Query Word")
+    ax.set_ylabel("Avg Latency (ms, log)")
+    ax.tick_params(axis="x", rotation=35)
+    if ax is not line_axes[0] and ax.get_legend() is not None:
+      ax.get_legend().remove()
 
   # Parse subplot
   sns.barplot(
@@ -257,13 +282,9 @@ def main(argv: Sequence[str]) -> None:
   sorted_engines = sort_engines(all_data)
 
   # Generate summary table
-  summary = generate_summary_table(
-    all_data, sorted_engines[-1], sorted_engines[0]
-  )
+  summary = generate_summary_table(all_data, sorted_engines)
   for engine in sorted_engines:
-    summary[engine] = summary[engine].map(
-      lambda value: f"{value:.2f} ms" if pd.notna(value) else "-"
-    )
+    summary[engine] = summary[engine].map(format_ms)
   summary["speedup"] = summary["speedup"].map(
     lambda value: f"{value:.1f}x" if pd.notna(value) else "-"
   )
