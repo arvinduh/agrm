@@ -9,7 +9,7 @@ use crate::commands::init::{InitArgs, run as run_init};
 use crate::commands::resolve_db_path;
 use crate::format::reader::Reader;
 use crate::ui::{
-  COLUMN_SPACING, MAX_LAYOUT_WIDTH, badge_info, detect_terminal_width,
+  COLUMN_SPACING, MAX_LAYOUT_WIDTH, detect_terminal_width,
   format_duration, format_result_summary, format_word_columns, format_word_grid,
 };
 
@@ -67,8 +67,7 @@ pub fn run(
   // Auto-init if database does not exist
   if !db_path.exists() {
     eprintln!(
-      "{} Initializing default dictionary at {:?}...",
-      badge_info(),
+      "Initializing default dictionary at {:?}...",
       db_path
     );
     let init_args = InitArgs {

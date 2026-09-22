@@ -8,30 +8,6 @@ use owo_colors::OwoColorize;
 use std::time::Duration;
 use terminal_size::{Width, terminal_size};
 
-/// Formats the informational badge with clean ANSI cyan.
-pub fn badge_info() -> String {
-  "[INFO]".cyan().bold().to_string()
-}
-
-/// Formats the success badge with clean ANSI green.
-pub fn badge_done() -> String {
-  "[DONE]".green().bold().to_string()
-}
-
-/// Formats the warning badge with clean ANSI yellow.
-pub fn badge_warn() -> String {
-  "[WARN]".yellow().bold().to_string()
-}
-
-/// Formats the error badge with clean ANSI red.
-pub fn badge_error() -> String {
-  "[ERROR]".red().bold().to_string()
-}
-
-/// Formats the benchmark badge with clean ANSI magenta.
-pub fn badge_bench() -> String {
-  "[BENCH]".magenta().bold().to_string()
-}
 
 /// Formats a duration into a human-readable string with appropriate units.
 pub fn format_duration(d: Duration) -> String {
@@ -120,11 +96,8 @@ pub fn format_word_columns(
       col_width.saturating_sub(word.len())
     };
 
-    if highlight {
-      out.push_str(&word.bright_green().bold().to_string());
-    } else {
-      out.push_str(word);
-    }
+    let _ = highlight;
+    out.push_str(word);
 
     if is_last_in_row {
       out.push('\n');
