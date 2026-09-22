@@ -8,33 +8,6 @@ use owo_colors::OwoColorize;
 use std::time::Duration;
 use terminal_size::{Width, terminal_size};
 
-
-/// Formats a duration into a human-readable string with appropriate units.
-pub fn format_duration(d: Duration) -> String {
-  let nanos = d.as_nanos();
-  if nanos < 1_000 {
-    format!("{nanos}ns")
-  } else if nanos < 1_000_000 {
-    format!("{:.2}µs", nanos as f64 / 1_000.0)
-  } else if nanos < 1_000_000_000 {
-    format!("{:.2}ms", nanos as f64 / 1_000_000.0)
-  } else {
-    format!("{:.2}s", nanos as f64 / 1_000_000_000.0)
-  }
-}
-
-/// Formats a duration cleanly into milliseconds or seconds (e.g. "0.432ms", "14.20ms", "1.10s").
-pub fn format_clean_time(d: Duration) -> String {
-  let millis = d.as_secs_f64() * 1000.0;
-  if millis < 1.0 {
-    format!("{:.3}ms", millis)
-  } else if millis < 1000.0 {
-    format!("{:.2}ms", millis)
-  } else {
-    format!("{:.2}s", millis / 1000.0)
-  }
-}
-
 /// Formats an integer with comma thousands separators (e.g. 370105 -> "370,105").
 pub fn format_count(n: usize) -> String {
   let s = n.to_string();
@@ -53,7 +26,7 @@ pub fn format_count(n: usize) -> String {
 pub fn format_result_summary(count: usize, elapsed: Duration) -> String {
   let word_label = if count == 1 { "word" } else { "words" };
   let count_str = format_count(count);
-  let time_str = format_clean_time(elapsed);
+  let time_str = format!("{elapsed:?}");
   format!(
     "{} {}  {}",
     count_str.bold(),
@@ -195,14 +168,6 @@ pub fn render_bar(value: f64, max_val: f64, max_cols: usize) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  #[test]
-  fn test_format_duration() {
-    assert_eq!(format_duration(Duration::from_nanos(500)), "500ns");
-    assert_eq!(format_duration(Duration::from_micros(12)), "12.00µs");
-    assert_eq!(format_duration(Duration::from_millis(42)), "42.00ms");
-    assert_eq!(format_duration(Duration::from_secs(2)), "2.00s");
-  }
 
   #[test]
   fn test_format_word_grid() {

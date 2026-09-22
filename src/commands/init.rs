@@ -9,7 +9,7 @@ use std::time::Instant;
 use crate::commands::resolve_db_path;
 use crate::format::writer::Writer;
 use crate::ingest::{DEFAULT_DICTIONARY_URL, Source, ingest};
-use crate::ui::{format_clean_time, format_count};
+use crate::ui::format_count;
 
 /// Arguments for the `agrm init` command.
 #[derive(Args)]
@@ -93,7 +93,7 @@ pub fn run(
     let total_elapsed = total_start.elapsed();
     let count_str = format_count(trie.total_words());
     let size_str = format!("{:.2} MB", file_size_mb);
-    let time_str = format_clean_time(total_elapsed);
+    let time_str = format!("{total_elapsed:?}");
     eprintln!(
       "{} {}  {}  {}",
       count_str.bold(),

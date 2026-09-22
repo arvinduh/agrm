@@ -12,8 +12,10 @@ use clap::Parser;
 use comfy_table::presets::UTF8_FULL;
 use comfy_table::{Cell, CellAlignment, Table};
 
-use anagram::ui::{format_count, format_duration, render_bar};
-use anagram::{DEFAULT_DICTIONARY_URL, Reader, Source, Writer, default_cache_path, ingest};
+use anagram::ui::{format_count, render_bar};
+use anagram::{
+  DEFAULT_DICTIONARY_URL, Reader, Source, Writer, default_cache_path, ingest,
+};
 
 #[derive(Parser, Debug)]
 #[command(about = "Benchmark anagram solver ingestion and queries")]
@@ -83,7 +85,10 @@ fn ensure_benchmark_database(raw_dict: &PathBuf) -> PathBuf {
   path
 }
 
-fn write_csv(path: &PathBuf, results: &[BenchmarkResult]) -> std::io::Result<()> {
+fn write_csv(
+  path: &PathBuf,
+  results: &[BenchmarkResult],
+) -> std::io::Result<()> {
   if let Some(parent) = path.parent() {
     std::fs::create_dir_all(parent)?;
   }
@@ -96,7 +101,14 @@ fn write_csv(path: &PathBuf, results: &[BenchmarkResult]) -> std::io::Result<()>
     writeln!(
       file,
       "{},{},{},1,{:.9},{:.9},{:.9},{:.9},{:.9}",
-      r.op, r.target, r.rounds, r.mean_s, r.min_s, r.max_s, r.median_s, r.stddev_s
+      r.op,
+      r.target,
+      r.rounds,
+      r.mean_s,
+      r.min_s,
+      r.max_s,
+      r.median_s,
+      r.stddev_s
     )?;
   }
   Ok(())
@@ -113,8 +125,8 @@ fn main() {
   let parse_rounds = 5;
   let mut parse_times = Vec::with_capacity(parse_rounds as usize);
   let mut total_words = 0;
-  let tmp_db =
-    std::env::temp_dir().join(format!("bench_parse_{}.tmp", std::process::id()));
+  let tmp_db = std::env::temp_dir()
+    .join(format!("bench_parse_{}.tmp", std::process::id()));
 
   for _ in 0..parse_rounds {
     let t0 = Instant::now();
@@ -232,8 +244,11 @@ fn main() {
     Cell::new(parse_result.target),
     Cell::new(format_count(parse_result.items_count))
       .set_alignment(CellAlignment::Right),
-    Cell::new(format_duration(Duration::from_secs_f64(parse_result.mean_s)))
-      .set_alignment(CellAlignment::Right),
+    Cell::new(format!(
+      "{:?}",
+      Duration::from_secs_f64(parse_result.mean_s)
+    ))
+    .set_alignment(CellAlignment::Right),
     Cell::new(format!("{:.0} w/s", parse_result.throughput_wps))
       .set_alignment(CellAlignment::Right),
   ]);
@@ -257,7 +272,7 @@ fn main() {
   for r in &query_results {
     let micros = r.mean_s * 1_000_000.0;
     let bar = render_bar(micros, max_query_micros, 20);
-    let time_str = format_duration(Duration::from_secs_f64(r.mean_s));
+    let time_str = format!("{:?}", Duration::from_secs_f64(r.mean_s));
     let wps_str = format!("{:.0} w/s", r.throughput_wps);
 
     query_table.add_row(vec![

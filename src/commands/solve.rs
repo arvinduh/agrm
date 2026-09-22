@@ -10,7 +10,7 @@ use crate::commands::resolve_db_path;
 use crate::format::reader::Reader;
 use crate::ui::{
   COLUMN_SPACING, MAX_LAYOUT_WIDTH, detect_terminal_width,
-  format_duration, format_result_summary, format_word_columns, format_word_grid,
+  format_result_summary, format_word_columns, format_word_grid,
 };
 
 /// Arguments for the `agrm solve` command.
@@ -66,10 +66,7 @@ pub fn run(
 
   // Auto-init if database does not exist
   if !db_path.exists() {
-    eprintln!(
-      "Initializing default dictionary at {:?}...",
-      db_path
-    );
+    eprintln!("Initializing default dictionary at {:?}...", db_path);
     let init_args = InitArgs {
       sources: Vec::new(),
       output: Some(db_path.clone()),
@@ -133,10 +130,7 @@ pub fn run(
           out,
           "{}",
           format!(
-            "  read: {} | solve: {} | display: {}",
-            format_duration(read_elapsed),
-            format_duration(solve_elapsed),
-            format_duration(format_elapsed),
+            "  read: {read_elapsed:?} | solve: {solve_elapsed:?} | display: {format_elapsed:?}"
           )
           .dimmed()
         )?;
@@ -220,10 +214,7 @@ pub fn run(
       out,
       "{}",
       format!(
-        "  read: {} | solve: {} | display: {}",
-        format_duration(read_elapsed),
-        format_duration(solve_elapsed),
-        format_duration(format_elapsed),
+        "  read: {read_elapsed:?} | solve: {solve_elapsed:?} | display: {format_elapsed:?}"
       )
       .dimmed()
     )?;
