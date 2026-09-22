@@ -1,11 +1,17 @@
 //! The `agrm` binary entry point.
 
 use clap::Parser;
+use std::process::ExitCode;
 
-fn main() {
-  let args = anagram::cli::Args::parse();
-  if let Err(err) = anagram::cli::run(args) {
-    eprintln!("[ERROR] {err}");
-    std::process::exit(1);
+use anagram::cli::{self, Args};
+
+fn main() -> ExitCode {
+  let args = Args::parse();
+  match cli::run(args) {
+    Ok(()) => ExitCode::SUCCESS,
+    Err(err) => {
+      eprintln!("[ERROR] {err}");
+      ExitCode::FAILURE
+    }
   }
 }
