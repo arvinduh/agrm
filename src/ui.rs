@@ -2,11 +2,10 @@
 //!
 //! Leverages battle-tested libraries:
 //! - [`owo_colors`]: zero-allocation, clean terminal coloring with automatic `NO_COLOR` support.
-//! - [`term_grid`]: adaptive multi-column grid formatting without border lines.
 //! - [`terminal_size`]: terminal width detection.
 
-use std::time::Duration;
 use owo_colors::OwoColorize;
+use std::time::Duration;
 use terminal_size::{Width, terminal_size};
 
 /// Formats the informational badge with clean ANSI cyan.
@@ -79,12 +78,19 @@ pub fn format_result_summary(count: usize, elapsed: Duration) -> String {
   let word_label = if count == 1 { "word" } else { "words" };
   let count_str = format_count(count);
   let time_str = format_clean_time(elapsed);
-  format!("{} {}  {}", count_str.bold(), word_label.dimmed(), time_str.cyan())
+  format!(
+    "{} {}  {}",
+    count_str.bold(),
+    word_label.dimmed(),
+    time_str.cyan()
+  )
 }
 
 /// Returns the detected terminal width, defaulting to 80 if not connected to a TTY.
 pub fn detect_terminal_width() -> usize {
-  terminal_size().map(|(Width(w), _)| w as usize).unwrap_or(80)
+  terminal_size()
+    .map(|(Width(w), _)| w as usize)
+    .unwrap_or(80)
 }
 
 /// Default horizontal space between columns.
@@ -187,48 +193,6 @@ pub fn format_word_grid(
   format_word_columns(words, col_width, num_cols, highlight)
 }
 
-/// Renders a structured table of anagrams grouped by length using `comfy-table`.
-pub fn format_anagram_table(
-  grouped: &[(usize, Vec<&str>)],
-  term_width: usize,
-) -> String {
-  use comfy_table::presets::UTF8_FULL;
-  use comfy_table::{Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
-
-  let mut table = Table::new();
-  table
-    .load_style(UTF8_FULL.with_rounded_corners())
-    .set_content_arrangement(ContentArrangement::Dynamic)
-    .set_width(term_width.clamp(40, 100) as u16)
-    .set_header(vec![
-      Cell::new("Length").set_alignment(CellAlignment::Center),
-      Cell::new("Count").set_alignment(CellAlignment::Right),
-      Cell::new("Anagrams"),
-    ]);
-
-  let longest_len = grouped.first().map(|(len, _)| *len).unwrap_or(0);
-
-  for (len, words) in grouped {
-    let is_longest = *len == longest_len;
-    let words_str = words.join("  ");
-    let len_str = len.to_string();
-    let count_str = words.len().to_string();
-
-    let mut words_cell = Cell::new(words_str);
-    if is_longest {
-      words_cell = words_cell.fg(Color::Green).add_attribute(Attribute::Bold);
-    }
-
-    table.add_row(vec![
-      Cell::new(len_str).set_alignment(CellAlignment::Center),
-      Cell::new(count_str).set_alignment(CellAlignment::Right),
-      words_cell,
-    ]);
-  }
-
-  table.to_string()
-}
-
 /// Renders a horizontal bar chart row using Unicode blocks.
 pub fn render_bar(value: f64, max_val: f64, max_cols: usize) -> String {
   if max_val <= 0.0 || value <= 0.0 {
@@ -265,18 +229,6 @@ mod tests {
     assert_eq!(format_duration(Duration::from_micros(12)), "12.00µs");
     assert_eq!(format_duration(Duration::from_millis(42)), "42.00ms");
     assert_eq!(format_duration(Duration::from_secs(2)), "2.00s");
-  }
-
-  #[test]
-  fn test_format_anagram_table() {
-    let words_6 = vec!["listen", "silent", "tinsel"];
-    let words_5 = vec!["inlet", "istle"];
-    let grouped = vec![(6, words_6), (5, words_5)];
-    let table = format_anagram_table(&grouped, 80);
-    assert!(table.contains("Length"));
-    assert!(table.contains("Count"));
-    assert!(table.contains("listen"));
-    assert!(table.contains("istle"));
   }
 
   #[test]
