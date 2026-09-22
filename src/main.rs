@@ -3,8 +3,8 @@
 use clap::Parser;
 
 fn main() {
-  let cli = anagram::cli::Cli::parse();
-  if let Err(err) = anagram::cli::run(cli) {
+  let args = anagram::cli::Args::parse();
+  if let Err(err) = anagram::cli::run(args) {
     eprintln!("[ERROR] {err}");
     std::process::exit(1);
   }

@@ -15,11 +15,14 @@ use std::path::PathBuf;
   about = "High-performance anagram solver backed by the .agrm binary database",
   long_about = None
 )]
-pub struct Cli {
+pub struct Args {
   /// The command to execute.
   #[command(subcommand)]
   pub command: Commands,
 }
+
+/// Backwards-compatible alias for [`Args`].
+pub type Cli = Args;
 
 /// Available subcommands for `agrm`.
 #[derive(Subcommand)]
@@ -43,8 +46,8 @@ pub fn resolve_db_path(explicit: Option<PathBuf>) -> PathBuf {
 }
 
 /// Dispatches the parsed command to its respective handler.
-pub fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  match cli.command {
+pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  match args.command {
     Commands::Init(args) => init::run(args),
     Commands::Solve(args) => solve::run(args),
   }
