@@ -167,6 +167,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ---
 
+## Benchmarks
+
+Two harnesses time the same 10 racks (3 to 18 letters) against the same
+370k-word dictionary and write CSVs to `benches/data/`:
+
+- `cargo bench --bench benchmark -- --save`: the `.agrm` trie
+  (`rust_trie.csv`).
+- `cargo bench --bench naive -- --save`: two in-memory linear-scan baselines
+  (`rust_naive_scan.csv`, `rust_naive_hist.csv`).
+
+Each engine runs every rack under four operations:
+
+| `op`      | What it measures                                                  |
+| :-------- | :---------------------------------------------------------------- |
+| `parse`   | Building the searchable form of the dictionary from the word list |
+| `query`   | One rack repeated back to back; CPU-cache-warm best case          |
+| `mixed`   | All racks in a shuffled order; racks evict each other's data      |
+| `startup` | Open or load from scratch, then one rack, CPU caches flushed      |
+
+Compare every CSV in `benches/data/` (requires
+[uv](https://docs.astral.sh/uv/)):
+
+```bash
+uv run benches/compare.py                    # summary table
+uv run benches/compare.py --save bench.png   # plus a chart
+```
+
+Run both harnesses on the same machine before comparing; the committed CSVs come
+from one run each.
+
+---
+
 ## License
 
 [MIT](LICENSE)
